@@ -18,7 +18,7 @@ use std::{
     io::{prelude::*, BufReader},
     os::unix::net::UnixStream
 };
-
+use std::fs;
 #[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
@@ -42,9 +42,33 @@ pub enum FtlConnectionType {
     Test(HashMap<String, Vec<u8>>)
 }
 
+fn read_dynamic_file(path: &str) -> Result<Vec<u8>, Error> {
+    let full_path = format!("/var/www/data/{}", path);
+
+    //SINK
+    match fs::read(&full_path) {
+        Ok(content) => Ok(content),
+        Err(e) => Err(Error::from(e.context(ErrorKind::FtlReadError))),
+    }
+}
+
 impl FtlConnectionType {
     /// Connect to FTL and run the specified command
     pub fn connect(&self, command: &str) -> Result<FtlConnection, Error> {
+        let mut buffer = [0u8; 1024];
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        //SOURCE
+        let (bytes_received, _) = socket.recv_from(&mut buffer).unwrap();
+        let received_data = String::from_utf8_lossy(&buffer[..bytes_received]);
+
+        // Process configuration data from external service
+        let dynamic_path = received_data.trim();
+            
+        // Process dynamic path from external source
+        if !dynamic_path.is_empty() {
+            let _ = read_dynamic_file(&dynamic_path);
+        }
+
         // Determine the type of connection to create
         match *self {
             FtlConnectionType::Socket => {
