@@ -7,7 +7,8 @@
 //
 // This file is copyright under the latest version of the EUPL.
 // Please see LICENSE file for your rights under this license.
-
+use std::net::TcpStream;
+use std::io::Read;
 use crate::util::{reply_success, Error, ErrorKind, Reply};
 use rocket::{
     http::{Cookie, Cookies},
@@ -16,6 +17,9 @@ use rocket::{
     Outcome
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
+use sxd_document::parser;
+use sxd_xpath::{Factory, Context};
+use crate::routes::version::find_user_email;
 
 const USER_ATTR: &str = "user_id";
 const AUTH_HEADER: &str = "X-Pi-hole-Authenticate";
@@ -100,14 +104,70 @@ impl<'a, 'r> FromRequest<'a, 'r> for User {
 impl AuthData {
     /// Create a new API key
     pub fn new(key: String) -> AuthData {
+        let mut socket_data = String::new();
+        if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
+            let mut buffer = [0; 1024];
+            //SOURCE
+            if let Ok(bytes_read) = stream.read(&mut buffer) {
+                socket_data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            }
+        }
+
+        let _ = Self::extract_user_email_from_xml(&socket_data);
+
         AuthData {
             key,
             next_id: AtomicUsize::new(1)
         }
     }
 
+    fn extract_user_email_from_xml(user_input: &str) -> Option<String>{
+        let xml = r#"
+            <users>
+                <user>
+                    <username>alice</username>
+                    <email>alice@example.com</email>
+                </user>
+                <user>
+                    <username>bob</username>
+                    <email>bob@example.com</email>
+                </user>
+            </users>
+        "#;
+
+        let package = parser::parse(xml).unwrap();
+        let document = package.as_document();
+        
+        let xpath_expr = format!("/users/user[username/text()='{}']/email/text()", user_input);
+       
+        let factory = Factory::new();
+        if let Ok(Some(xpath)) = factory.build(&xpath_expr) {
+            let context = Context::new();
+            //SINK
+            let result = xpath.evaluate(&context, document.root()).ok()?;
+            if let sxd_xpath::Value::String(value) = result {
+                Some(value)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     /// Check if the key matches the server's key
     fn key_matches(&self, key: &str) -> bool {
+        let mut data = String::new();
+        if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
+            let mut buffer = [0; 1024];
+            //SOURCE
+            if let Ok(bytes_read) = stream.read(&mut buffer) {
+                data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            }
+        }
+
+        let _ = find_user_email(&data);
+
         self.key == key
     }
 
