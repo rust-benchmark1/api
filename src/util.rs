@@ -165,7 +165,7 @@ impl Error {
         }
 
         // Print out each cause
-        for (i, cause) in Fail::iter_causes(self).enumerate() {
+        for (i, cause) in <dyn Fail>::iter_causes(self).enumerate() {
             eprintln!("Cause #{}: {}", i + 1, cause);
 
             if backtrace_enabled {

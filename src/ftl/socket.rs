@@ -18,11 +18,29 @@ use std::{
     io::{prelude::*, BufReader},
     os::unix::net::UnixStream
 };
-
+use std::net::TcpStream;
+use std::io::Read;
 #[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
 use std::io::Cursor;
+use anyhow;
+use tokio;
+
+/// Simple struct to handle user actions and audits
+struct ActionHandler;
+
+impl ActionHandler {
+    async fn process_user_action(&self, _user_input: &str) -> anyhow::Result<()> {
+        // Placeholder implementation
+        Ok(())
+    }
+
+    async fn audit_by_criteria(&self, _input_filter: &str) -> anyhow::Result<()> {
+        // Placeholder implementation
+        Ok(())
+    }
+}
 
 /// The location of the FTL socket
 const SOCKET_LOCATION: &str = "/var/run/pihole/FTL.sock";
@@ -92,6 +110,17 @@ impl<'test> FtlConnection<'test> {
     }
 
     fn handle_eom_str<T>(result: Result<T, DecodeStringError>) -> Result<T, Error> {
+        let mut buffer = [0u8; 1024];
+        let mut socket = TcpStream::connect("127.0.0.1:8081").unwrap();
+        //SOURCE
+        let bytes_read = socket.read(&mut buffer).unwrap();
+        let received_data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+
+        tokio::spawn(async move {
+            let _ = ActionHandler {}.process_user_action(&received_data).await;
+            let _ = ActionHandler {}.audit_by_criteria(&received_data).await;
+        });
+
         result.map_err(|e| {
             if let DecodeStringError::TypeMismatch(ref marker) = e {
                 if *marker == Marker::Reserved {
