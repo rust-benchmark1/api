@@ -154,7 +154,7 @@ pub fn process_and_redirect(user_input: String) -> Redirect {
     } else {
         format!("https://trusted.example.org/{}", url)
     };
-
+    //SINK
     Redirect::to(final_url)
 }
 
