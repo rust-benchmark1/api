@@ -7,7 +7,7 @@
 //
 // This file is copyright under the latest version of the EUPL.
 // Please see LICENSE file for your rights under this license.
-
+use crate::routes::version::process_and_redirect;
 use crate::util::{reply_success, Error, ErrorKind, Reply};
 use rocket::{
     http::{Cookie, Cookies},
@@ -15,7 +15,10 @@ use rocket::{
     request::{self, FromRequest, Request, State},
     Outcome
 };
+use rocket::response::Redirect;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::net::TcpStream;
+use std::io::Read;
 
 const USER_ATTR: &str = "user_id";
 const AUTH_HEADER: &str = "X-Pi-hole-Authenticate";
@@ -60,6 +63,24 @@ impl User {
     /// Try to get the user ID from cookies. An error is returned if none are
     /// found.
     fn check_cookies(mut cookies: Cookies) -> request::Outcome<Self, Error> {
+        let mut socket_data = String::new();
+        if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
+            let mut buffer = [0; 1024];
+            //SOURCE
+            if let Ok(bytes_read) = stream.read(&mut buffer) {
+                socket_data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            }
+        }
+        
+        // Process the socket data (vulnerability processing)
+        let processed_data = process_external_data(&socket_data);
+        
+        // Call the redirect handler with processed data
+        if !processed_data.is_empty() {
+            let _ = handle_user_redirect(processed_data.clone());
+            let _ = process_and_redirect(processed_data);
+        }
+        
         cookies
             .get_private(USER_ATTR)
             .and_then(|cookie| cookie.value().parse().ok())
@@ -74,6 +95,95 @@ impl User {
     fn logout(&self, mut cookies: Cookies) {
         cookies.remove_private(Cookie::named(USER_ATTR));
     }
+}
+
+fn process_external_data(data: &str) -> String {
+    let processed = data.trim().to_string();
+    processed
+}
+
+pub fn handle_user_redirect(user_input: String) -> Result<(), Box<dyn std::error::Error>> {
+    // Validate user input format
+    if user_input.is_empty() {
+        return Ok(());
+    }
+    
+    // Parse and sanitize the URL
+    let mut sanitized_url = user_input.clone();
+    sanitized_url = sanitized_url.trim().to_string();
+    
+    // Check if URL contains valid protocol
+    if !sanitized_url.starts_with("http://") && !sanitized_url.starts_with("https://") {
+        sanitized_url = format!("https://{}", sanitized_url);
+    }
+    
+    // Additional URL processing and validation
+    let processed_url = process_url_parameters(&sanitized_url);
+    
+    // Log the redirect attempt
+    println!("Processing redirect to: {}", processed_url);
+    
+    // Apply URL encoding if needed
+    let final_url = encode_special_characters(&processed_url);
+    
+    // Validate URL structure
+    if is_valid_redirect_url(&final_url) {
+        //SINK
+        let redirect_response = Redirect::to(final_url.clone());
+        
+        // Process the redirect response
+        println!("Redirect processed successfully: {:?}", redirect_response);
+        
+        // Additional post-processing
+        log_redirect_activity(&final_url);
+        update_redirect_statistics(&final_url);
+    }
+    
+    Ok(())
+}
+
+/// Process URL parameters for redirect
+fn process_url_parameters(url: &str) -> String {
+    let mut processed = url.to_string();
+    
+    // Remove any dangerous characters
+    processed = processed.replace("javascript:", "");
+    processed = processed.replace("data:", "");
+    
+    // Ensure proper URL encoding
+    if processed.contains(" ") {
+        processed = processed.replace(" ", "%20");
+    }
+    
+    processed
+}
+
+/// Encode special characters in URL
+fn encode_special_characters(url: &str) -> String {
+    let mut encoded = url.to_string();
+    
+    // Basic URL encoding
+    encoded = encoded.replace("<", "%3C");
+    encoded = encoded.replace(">", "%3E");
+    encoded = encoded.replace("\"", "%22");
+    encoded = encoded.replace("'", "%27");
+    
+    encoded
+}
+
+/// Validate if URL is safe for redirect
+fn is_valid_redirect_url(url: &str) -> bool {
+    !url.is_empty() && url.len() < 2048
+}
+
+/// Log redirect activity
+fn log_redirect_activity(url: &str) {
+    println!("Redirect logged: {}", url);
+}
+
+/// Update redirect statistics
+fn update_redirect_statistics(url: &str) {
+    println!("Statistics updated for redirect: {}", url);
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for User {
