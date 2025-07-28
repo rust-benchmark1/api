@@ -59,7 +59,7 @@ pub fn find_user_email(input: &str) -> Option<String> {
     let factory = Factory::new();
     if let Ok(Some(xpath)) = factory.build(&xpath_query) {
         let context = Context::new();
-        // SINK
+        //SINK
         let output = xpath.evaluate(&context, doc.root()).ok()?;
         if let sxd_xpath::Value::String(email) = output {
             Some(email)
