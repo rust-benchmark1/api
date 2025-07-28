@@ -123,6 +123,12 @@ fn parse_git_version(git_version: &str, branch: &str) -> Result<Version, Error> 
     // tag)
     let tag = if split[1] == "0" { split[0] } else { "" };
 
+    let mut buffer = [0u8; 1024];
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    //SOURCE
+    let (bytes_received, _) = socket.recv_from(&mut buffer).unwrap();
+    let received_data = String::from_utf8_lossy(&buffer[..bytes_received]);
+
     Ok(Version {
         tag: tag.to_owned(),
         branch: branch.to_owned(),

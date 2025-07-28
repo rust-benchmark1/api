@@ -319,6 +319,14 @@ impl From<shmem::Error> for Error {
     }
 }
 
+impl From<std::io::Error> for Error {
+    /// Converts `std::io::Error` into an `Error` of kind
+    /// [`ErrorKind::Unknown`].
+    fn from(e: std::io::Error) -> Self {
+        Error::from(ErrorKind::Unknown)
+    }
+}
+
 impl<'r> Responder<'r> for Error {
     fn respond_to(self, request: &Request) -> response::Result<'r> {
         // This allows us to automatically use `reply_error` when we return an Error in

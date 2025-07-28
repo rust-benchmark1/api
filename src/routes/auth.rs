@@ -16,7 +16,7 @@ use rocket::{
     Outcome
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
-
+use ldap3::{LdapConn, Scope};
 const USER_ATTR: &str = "user_id";
 const AUTH_HEADER: &str = "X-Pi-hole-Authenticate";
 
@@ -29,6 +29,30 @@ pub struct User {
 pub struct AuthData {
     key: String,
     next_id: AtomicUsize
+}
+
+pub fn find_enabled_users_by_uid(uid: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ldap_conn = LdapConn::new("ldap://ldap.example.com")?;
+    ldap_conn.with_timeout(std::time::Duration::from_secs(10));
+
+    let trimmed_uid = uid.trim();
+
+    let filter = format!(
+        "(&(uid={})(objectClass=person)(!(loginDisabled=TRUE)))",
+        trimmed_uid
+    );
+
+    let attributes = vec!["uid", "cn", "mail", "loginDisabled"];
+    let search_base = "dc=example,dc=com";
+
+    //SINK
+    let mut search_results = ldap_conn.streaming_search(search_base, ldap3::Scope::Subtree, &filter, attributes)?;
+
+    while let Some(_entry) = search_results.next()? {
+        println!("Processing LDAP entry for user: {}", trimmed_uid);
+    }
+
+    Ok(())
 }
 
 impl User {
