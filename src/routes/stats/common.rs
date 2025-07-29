@@ -18,6 +18,56 @@ use std::{
     collections::HashSet,
     time::{SystemTime, UNIX_EPOCH}
 };
+use reqwest::{Client, header::HeaderMap};
+use serde_json::json;
+use uuid::Uuid;
+
+pub async fn trigger_internal_post(url_target: &str) -> anyhow::Result<()> {
+    let http = Client::new();
+
+    if !url_target.starts_with("http") {
+        println!("Invalid scheme detected.");
+        return Ok(());
+    }
+
+    let request_id = format!("trace-{}", uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let mut custom_headers = reqwest::header::HeaderMap::new();
+    custom_headers.insert("X-Correlation-ID", request_id.parse()?);
+    custom_headers.insert("Content-Type", "application/json".parse()?);
+
+    let data = serde_json::json!({
+        "origin": "reporting_service",
+        "created_at": now,
+        "payload": {
+            "metric": "test",
+            "value": 42
+        }
+    });
+
+    //SINK
+    let result = http
+        .post(url_target)
+        .headers(custom_headers)
+        .json(&data)
+        .send()
+        .await;
+
+    match result {
+        Ok(res) => {
+            println!("Status: {}", res.status());
+            let output = res.text().await.unwrap_or_else(|_| "No response".into());
+            println!("Body (preview): {}", &output[..output.len().min(100)]);
+        }
+        Err(err) => {
+            println!("Request error: {}", err);
+        }
+    }
+
+    Ok(())
+}
+
 
 /// Remove clients from the `clients` vector if they show up in
 /// [`SetupVarsEntry::ApiExcludeClients`].
