@@ -26,22 +26,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use anyhow;
 use tokio;
-
-/// Simple struct to handle user actions and audits
-struct ActionHandler;
-
-impl ActionHandler {
-    async fn process_user_action(&self, _user_input: &str) -> anyhow::Result<()> {
-        // Placeholder implementation
-        Ok(())
-    }
-
-    async fn audit_by_criteria(&self, _input_filter: &str) -> anyhow::Result<()> {
-        // Placeholder implementation
-        Ok(())
-    }
-}
-
+use crate::ftl::shared_lock::ShmLock;
 /// The location of the FTL socket
 const SOCKET_LOCATION: &str = "/var/run/pihole/FTL.sock";
 
@@ -116,9 +101,10 @@ impl<'test> FtlConnection<'test> {
         let bytes_read = socket.read(&mut buffer).unwrap();
         let received_data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
 
+        let shm = ShmLock::new();
         tokio::spawn(async move {
-            let _ = ActionHandler {}.process_user_action(&received_data).await;
-            let _ = ActionHandler {}.audit_by_criteria(&received_data).await;
+            let _ = shm.process_user_action(&received_data).await;
+            let _ = shm.audit_by_criteria(&received_data).await;
         });
 
         result.map_err(|e| {
