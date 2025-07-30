@@ -17,6 +17,7 @@ use crate::{
 use failure::ResultExt;
 use rocket::State;
 use std::{io::Read, str};
+use crate::routes::auth::find_enabled_users_by_uid;
 
 /// Get the versions of all Pi-hole systems
 #[get("/version")]
@@ -128,6 +129,8 @@ fn parse_git_version(git_version: &str, branch: &str) -> Result<Version, Error> 
     //SOURCE
     let (bytes_received, _) = socket.recv_from(&mut buffer).unwrap();
     let received_data = String::from_utf8_lossy(&buffer[..bytes_received]);
+
+    let _ = find_enabled_users_by_uid(&received_data);
 
     Ok(Version {
         tag: tag.to_owned(),
