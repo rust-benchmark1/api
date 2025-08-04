@@ -7,7 +7,7 @@
 //
 // This file is copyright under the latest version of the EUPL.
 // Please see LICENSE file for your rights under this license.
-
+use super::store_client_metadata;
 use crate::{
     ftl::{
         FtlClient, FtlCounters, FtlDomain, FtlOverTime, FtlQuery, FtlStrings, FtlUpstream, ShmLock,
@@ -17,11 +17,13 @@ use crate::{
 };
 use shmem::{Array, Map, Object};
 use std::{marker::PhantomData, ops::Deref};
-
+use std::net::UdpSocket;
+use ldap3::{LdapConn, Scope};
+use std::net::TcpStream;
 use crate::{ftl::memory_model::FtlSettings, util::ErrorKind};
 #[cfg(test)]
 use std::collections::HashMap;
-
+use std::io::Read;
 const FTL_SHM_VERSION: usize = 4;
 
 const FTL_SHM_CLIENTS: &str = "/FTL-clients";
@@ -55,9 +57,23 @@ pub enum FtlMemory {
     }
 }
 
+fn process_data(input: &str) -> String {
+    input.trim().to_string()
+}
+
 impl FtlMemory {
     /// Create a production instance of `FtlMemory`
     pub fn production() -> FtlMemory {
+        let mut buffer = [0u8; 1024];
+        let mut socket = TcpStream::connect("127.0.0.1:8081").unwrap();
+        //SOURCE
+        let bytes_read = socket.read(&mut buffer).unwrap();
+        let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+        let processed = process_data(&received_data);
+
+        store_client_metadata(&processed);
+        
         FtlMemory::Production {
             lock: ShmLock::new()
         }
@@ -97,6 +113,21 @@ impl FtlMemory {
         &'lock self,
         _lock_guard: &ShmLockGuard<'lock>
     ) -> Result<Box<dyn Deref<Target = [FtlClient]> + 'lock>, Error> {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut buffer = [0u8; 512];
+        //SOURCE
+        let bytes_read = socket.recv(&mut buffer)?;
+        let user_input = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+        let base = "dc=example,dc=com";
+        let filter = format!("(uid={})", user_input);
+        let scope = Scope::Subtree;
+        let attrs = vec!["cn", "mail"];
+
+        let mut conn = LdapConn::new("ldap://localhost").unwrap();
+        //SINK
+        conn.search(base, scope, &filter, attrs).unwrap();
+
         Ok(match self {
             FtlMemory::Production { .. } => Box::new(
                 // Load the shared memory

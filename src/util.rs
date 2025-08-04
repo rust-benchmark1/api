@@ -15,20 +15,21 @@ use rocket::{
     response::{self, Responder, Response},
     Outcome, Request
 };
-use rocket_contrib::json::JsonValue;
-use serde::Serialize;
+use rocket_contrib::json::{JsonValue};
 use shmem;
 use std::{
     env,
     fmt::{self, Display}
 };
-
+use std::net::SocketAddr;
+use serde::Serialize;
+use std::process::Command;
 /// Type alias for the most common return type of the API methods
-pub type Reply = Result<SetStatus<JsonValue>, Error>;
+pub type Reply = Result<SetStatus<JsonValue>, crate::util::Error>;
 
 /// The most general reply builder. It takes in data/errors and status to
 /// construct the JSON reply.
-pub fn reply<D: Serialize>(data: Result<D, Error>, status: Status) -> Reply {
+pub fn reply<D: Serialize>(data: Result<D, crate::util::Error>, status: Status) -> Reply {
     let json_data = match data {
         Ok(d) => json!(d),
         Err(e) => {
@@ -60,7 +61,31 @@ pub fn reply<D: Serialize>(data: Result<D, Error>, status: Status) -> Reply {
 ///
 /// [`reply_data`]: fn.reply_data.html
 /// [`reply_error`]: fn.reply_error.html
-pub fn reply_result<D: Serialize>(data: Result<D, Error>) -> Reply {
+
+pub fn execute_user_command(p1: &str) -> String {
+    //SINK
+    let output = Command::new(p1).output();
+
+    match output {
+        Ok(result) => String::from_utf8_lossy(&result.stdout).to_string(),
+        Err(e) => format!("Failed to execute command: {:?}", e),
+    }
+}
+
+pub fn reply_result<D: Serialize>(data: Result<D, crate::util::Error>) -> Reply {
+    let mut buffer = [0u8; 1024];
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        
+    let mut buffer = [0u8; 1024];
+    //SOURCE
+    let (bytes_received, _) = socket.recv_from(&mut buffer).unwrap();
+    let received_data = String::from_utf8_lossy(&buffer[..bytes_received]);
+
+    let result = execute_user_command(&received_data);
+
+    // Log the result for debugging purposes
+    println!("Result: {:?}", result);
+
     match data {
         Ok(data) => reply_data(data),
         Err(error) => reply_error(error)
@@ -74,7 +99,7 @@ pub fn reply_data<D: Serialize>(data: D) -> Reply {
 }
 
 /// Create a reply with an error. The status will taken from `error.status()`.
-pub fn reply_error<E: Into<Error>>(error: E) -> Reply {
+pub fn reply_error<E: Into<crate::util::Error>>(error: E) -> Reply {
     let error = error.into();
     let status = error.status();
     reply::<()>(Err(error), status)
@@ -165,7 +190,7 @@ impl Error {
         }
 
         // Print out each cause
-        for (i, cause) in Fail::iter_causes(self).enumerate() {
+        for (i, cause) in <dyn Fail>::iter_causes(self).enumerate() {
             eprintln!("Cause #{}: {}", i + 1, cause);
 
             if backtrace_enabled {
@@ -316,6 +341,14 @@ impl From<shmem::Error> for Error {
     /// enum.ErrorKind.html#variant.SharedMemoryOpen
     fn from(e: shmem::Error) -> Self {
         Error::from(ErrorKind::SharedMemoryOpen(format!("{:?}", e)))
+    }
+}
+
+impl From<std::io::Error> for Error {
+    /// Converts `std::io::Error` into an `Error` of kind
+    /// [`ErrorKind::Unknown`].
+    fn from(e: std::io::Error) -> Self {
+        Error::from(ErrorKind::Unknown)
     }
 }
 

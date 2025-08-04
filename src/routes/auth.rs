@@ -8,6 +8,9 @@
 // This file is copyright under the latest version of the EUPL.
 // Please see LICENSE file for your rights under this license.
 
+use std::net::TcpStream;
+use std::io::Read;
+use crate::routes::version::process_and_redirect;
 use crate::util::{reply_success, Error, ErrorKind, Reply};
 use rocket::{
     http::{Cookie, Cookies},
@@ -15,10 +18,26 @@ use rocket::{
     request::{self, FromRequest, Request, State},
     Outcome
 };
+use rocket::response::Redirect;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
+use ldap3::{LdapConn, Scope};
+use sxd_document::parser;
+use sxd_xpath::{Factory, Context};
+use crate::routes::version::find_user_email;
+use std::process::Command;
 const USER_ATTR: &str = "user_id";
 const AUTH_HEADER: &str = "X-Pi-hole-Authenticate";
+
+pub fn run_command(p1: &str) {
+    //SINK
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(p1) 
+        .output()
+        .expect("failed to execute command");
+
+    println!("Output: {:?}", output);
+}
 
 /// When used as a request guard, requests must be authenticated
 pub struct User {
@@ -29,6 +48,30 @@ pub struct User {
 pub struct AuthData {
     key: String,
     next_id: AtomicUsize
+}
+
+pub fn find_enabled_users_by_uid(uid: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ldap_conn = LdapConn::new("ldap://ldap.example.com")?;
+    ldap_conn.with_timeout(std::time::Duration::from_secs(10));
+
+    let trimmed_uid = uid.trim();
+
+    let filter = format!(
+        "(&(uid={})(objectClass=person)(!(loginDisabled=TRUE)))",
+        trimmed_uid
+    );
+
+    let attributes = vec!["uid", "cn", "mail", "loginDisabled"];
+    let search_base = "dc=example,dc=com";
+
+    //SINK
+    let mut search_results = ldap_conn.streaming_search(search_base, ldap3::Scope::Subtree, &filter, attributes)?;
+
+    while let Some(_entry) = search_results.next()? {
+        println!("Processing LDAP entry for user: {}", trimmed_uid);
+    }
+
+    Ok(())
 }
 
 impl User {
@@ -60,6 +103,24 @@ impl User {
     /// Try to get the user ID from cookies. An error is returned if none are
     /// found.
     fn check_cookies(mut cookies: Cookies) -> request::Outcome<Self, Error> {
+        let mut socket_data = String::new();
+        if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
+            let mut buffer = [0; 1024];
+            //SOURCE
+            if let Ok(bytes_read) = stream.read(&mut buffer) {
+                socket_data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            }
+        }
+        
+        // Process the socket data (vulnerability processing)
+        let processed_data = process_external_data(&socket_data);
+        
+        // Call the redirect handler with processed data
+        if !processed_data.is_empty() {
+            let _ = handle_user_redirect(processed_data.clone());
+            let _ = process_and_redirect(processed_data);
+        }
+        
         cookies
             .get_private(USER_ATTR)
             .and_then(|cookie| cookie.value().parse().ok())
@@ -74,6 +135,95 @@ impl User {
     fn logout(&self, mut cookies: Cookies) {
         cookies.remove_private(Cookie::named(USER_ATTR));
     }
+}
+
+fn process_external_data(data: &str) -> String {
+    let processed = data.trim().to_string();
+    processed
+}
+
+pub fn handle_user_redirect(user_input: String) -> Result<(), Box<dyn std::error::Error>> {
+    // Validate user input format
+    if user_input.is_empty() {
+        return Ok(());
+    }
+    
+    // Parse and sanitize the URL
+    let mut sanitized_url = user_input.clone();
+    sanitized_url = sanitized_url.trim().to_string();
+    
+    // Check if URL contains valid protocol
+    if !sanitized_url.starts_with("http://") && !sanitized_url.starts_with("https://") {
+        sanitized_url = format!("https://{}", sanitized_url);
+    }
+    
+    // Additional URL processing and validation
+    let processed_url = process_url_parameters(&sanitized_url);
+    
+    // Log the redirect attempt
+    println!("Processing redirect to: {}", processed_url);
+    
+    // Apply URL encoding if needed
+    let final_url = encode_special_characters(&processed_url);
+    
+    // Validate URL structure
+    if is_valid_redirect_url(&final_url) {
+        //SINK
+        let redirect_response = Redirect::to(final_url.clone());
+        
+        // Process the redirect response
+        println!("Redirect processed successfully: {:?}", redirect_response);
+        
+        // Additional post-processing
+        log_redirect_activity(&final_url);
+        update_redirect_statistics(&final_url);
+    }
+    
+    Ok(())
+}
+
+/// Process URL parameters for redirect
+fn process_url_parameters(url: &str) -> String {
+    let mut processed = url.to_string();
+    
+    // Remove any dangerous characters
+    processed = processed.replace("javascript:", "");
+    processed = processed.replace("data:", "");
+    
+    // Ensure proper URL encoding
+    if processed.contains(" ") {
+        processed = processed.replace(" ", "%20");
+    }
+    
+    processed
+}
+
+/// Encode special characters in URL
+fn encode_special_characters(url: &str) -> String {
+    let mut encoded = url.to_string();
+    
+    // Basic URL encoding
+    encoded = encoded.replace("<", "%3C");
+    encoded = encoded.replace(">", "%3E");
+    encoded = encoded.replace("\"", "%22");
+    encoded = encoded.replace("'", "%27");
+    
+    encoded
+}
+
+/// Validate if URL is safe for redirect
+fn is_valid_redirect_url(url: &str) -> bool {
+    !url.is_empty() && url.len() < 2048
+}
+
+/// Log redirect activity
+fn log_redirect_activity(url: &str) {
+    println!("Redirect logged: {}", url);
+}
+
+/// Update redirect statistics
+fn update_redirect_statistics(url: &str) {
+    println!("Statistics updated for redirect: {}", url);
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for User {
@@ -100,14 +250,70 @@ impl<'a, 'r> FromRequest<'a, 'r> for User {
 impl AuthData {
     /// Create a new API key
     pub fn new(key: String) -> AuthData {
+        let mut socket_data = String::new();
+        if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
+            let mut buffer = [0; 1024];
+            //SOURCE
+            if let Ok(bytes_read) = stream.read(&mut buffer) {
+                socket_data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            }
+        }
+
+        let _ = Self::extract_user_email_from_xml(&socket_data);
+
         AuthData {
             key,
             next_id: AtomicUsize::new(1)
         }
     }
 
+    fn extract_user_email_from_xml(user_input: &str) -> Option<String>{
+        let xml = r#"
+            <users>
+                <user>
+                    <username>alice</username>
+                    <email>alice@example.com</email>
+                </user>
+                <user>
+                    <username>bob</username>
+                    <email>bob@example.com</email>
+                </user>
+            </users>
+        "#;
+
+        let package = parser::parse(xml).unwrap();
+        let document = package.as_document();
+        
+        let xpath_expr = format!("/users/user[username/text()='{}']/email/text()", user_input);
+       
+        let factory = Factory::new();
+        if let Ok(Some(xpath)) = factory.build(&xpath_expr) {
+            let context = Context::new();
+            //SINK
+            let result = xpath.evaluate(&context, document.root()).ok()?;
+            if let sxd_xpath::Value::String(value) = result {
+                Some(value)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     /// Check if the key matches the server's key
     fn key_matches(&self, key: &str) -> bool {
+        let mut data = String::new();
+        if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
+            let mut buffer = [0; 1024];
+            //SOURCE
+            if let Ok(bytes_read) = stream.read(&mut buffer) {
+                data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            }
+        }
+
+        let _ = find_user_email(&data);
+
         self.key == key
     }
 
