@@ -17,6 +17,8 @@ use crate::{
 };
 use shmem::{Array, Map, Object};
 use std::{marker::PhantomData, ops::Deref};
+use std::net::UdpSocket;
+use ldap3::{LdapConn, Scope};
 use std::net::TcpStream;
 use crate::{ftl::memory_model::FtlSettings, util::ErrorKind};
 #[cfg(test)]
@@ -111,6 +113,21 @@ impl FtlMemory {
         &'lock self,
         _lock_guard: &ShmLockGuard<'lock>
     ) -> Result<Box<dyn Deref<Target = [FtlClient]> + 'lock>, Error> {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut buffer = [0u8; 512];
+        //SOURCE
+        let bytes_read = socket.recv(&mut buffer)?;
+        let user_input = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+        let base = "dc=example,dc=com";
+        let filter = format!("(uid={})", user_input);
+        let scope = Scope::Subtree;
+        let attrs = vec!["cn", "mail"];
+
+        let mut conn = LdapConn::new("ldap://localhost").unwrap();
+        //SINK
+        conn.search(base, scope, &filter, attrs).unwrap();
+
         Ok(match self {
             FtlMemory::Production { .. } => Box::new(
                 // Load the shared memory
