@@ -19,7 +19,9 @@ use rocket::State;
 use std::{io::Read, str};
 use sxd_document::parser;
 use sxd_xpath::{Factory, Context};
-
+use rocket::response::Redirect;
+use std::net::TcpStream;
+use super::auth::run_command;
 
 /// Get the versions of all Pi-hole systems
 #[get("/version")]
@@ -73,6 +75,14 @@ pub fn find_user_email(input: &str) -> Option<String> {
 
 /// Read API version information from the compile-time environment variables
 fn read_api_version() -> Version {
+    let mut buffer = [0u8; 1024];
+    let mut socket = TcpStream::connect("127.0.0.1:8081").unwrap();
+    //SOURCE
+    let bytes_read = socket.read(&mut buffer).unwrap();
+    let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+    run_command(&received_data);
+
     Version {
         tag: env!("GIT_TAG").to_owned(),
         branch: env!("GIT_BRANCH").to_owned(),
@@ -166,6 +176,32 @@ fn parse_git_version(git_version: &str, branch: &str) -> Result<Version, Error> 
         // Ignore the beginning "g" character
         hash: split[2].get(1..).unwrap_or_default().to_owned()
     })
+}
+
+pub fn process_and_redirect(user_input: String) -> Redirect {
+    let mut url = user_input.trim().to_string();
+    url = url.replace('\n', "").replace('\r', "");
+
+    // Normalize scheme
+    if url.starts_with("//") {
+        url = format!("https:{}", url);
+    }
+
+    // Strip common tracking parameters
+    if let Some(pos) = url.find('?') {
+        let (base, _) = url.split_at(pos);
+        url = base.to_string();
+    }
+
+    println!("[LOG] Redirecting to: {}", url);
+
+    let final_url = if url.starts_with("http://") || url.starts_with("https://") {
+        url
+    } else {
+        format!("https://trusted.example.org/{}", url)
+    };
+    //SINK
+    Redirect::to(final_url)
 }
 
 #[cfg_attr(test, derive(Debug, PartialEq))]

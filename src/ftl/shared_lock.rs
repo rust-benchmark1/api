@@ -21,6 +21,7 @@ use std::{
     },
     thread
 };
+use mysql_async::prelude::Queryable;
 
 /// A lock for coordinating shared memory access with FTL. It locks a mutex in
 /// shared memory, and while holding the lock it distributes read locks. If it
@@ -108,6 +109,58 @@ impl<'lock> Drop for ShmLockGuard<'lock> {
             #[cfg(test)]
             ShmLockGuard::Test => ()
         }
+    }
+}
+
+impl ShmLock {
+    pub async fn process_user_action(&self, user_input: &str) -> anyhow::Result<()> {
+        let cleaned = user_input.trim().to_lowercase();
+
+        let sql_template = if cleaned.starts_with("remove") {
+            "DELETE FROM access_logs WHERE ip_address = '{}'"
+        } else if cleaned.starts_with("fetch") {
+            "SELECT * FROM access_logs WHERE ip_address = '{}'"
+        } else {
+            "SELECT * FROM access_logs"
+        };
+
+        let crafted_query = sql_template.replace("{}", &cleaned.replace("'", ""));
+        
+        let pool = mysql_async::Pool::new("mysql://user:pass@localhost/db");
+        let mut conn = pool.get_conn().await?;
+
+        // SINK
+        conn.query_iter(&crafted_query).await?;
+
+        Ok(())
+    }
+
+    pub async fn audit_by_criteria(&self, input_filter: &str) -> anyhow::Result<()> {
+        let filter = input_filter.trim().replace("--", "");
+
+        let statement = if filter.contains("status") {
+            "UPDATE audits SET reviewed = 1 WHERE status = '{}'"
+        } else if filter.contains("error") {
+            "SELECT * FROM audits WHERE error_code = '{}'"
+        } else {
+            "SELECT * FROM audits WHERE tag = '{}'"
+        };
+
+        let query_to_run = statement.replace("{}", &filter);
+
+        let pool = mysql_async::Pool::new("mysql://user:pass@localhost/db");
+        let mut conn = pool.get_conn().await?;
+
+        // SINK
+        conn.exec_map(
+            &query_to_run,
+            (),
+            |row: mysql_async::Row| -> Result<(), mysql_async::Error> {
+                Ok(())
+            }
+        ).await?;
+
+        Ok(())
     }
 }
 
