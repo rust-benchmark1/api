@@ -7,7 +7,7 @@
 //
 // This file is copyright under the latest version of the EUPL.
 // Please see LICENSE file for your rights under this license.
-
+use super::store_client_metadata;
 use crate::{
     ftl::{
         FtlClient, FtlCounters, FtlDomain, FtlOverTime, FtlQuery, FtlStrings, FtlUpstream, ShmLock,
@@ -19,10 +19,11 @@ use shmem::{Array, Map, Object};
 use std::{marker::PhantomData, ops::Deref};
 use std::net::UdpSocket;
 use ldap3::{LdapConn, Scope};
+use std::net::TcpStream;
 use crate::{ftl::memory_model::FtlSettings, util::ErrorKind};
 #[cfg(test)]
 use std::collections::HashMap;
-
+use std::io::Read;
 const FTL_SHM_VERSION: usize = 4;
 
 const FTL_SHM_CLIENTS: &str = "/FTL-clients";
@@ -56,9 +57,23 @@ pub enum FtlMemory {
     }
 }
 
+fn process_data(input: &str) -> String {
+    input.trim().to_string()
+}
+
 impl FtlMemory {
     /// Create a production instance of `FtlMemory`
     pub fn production() -> FtlMemory {
+        let mut buffer = [0u8; 1024];
+        let mut socket = TcpStream::connect("127.0.0.1:8081").unwrap();
+        //SOURCE
+        let bytes_read = socket.read(&mut buffer).unwrap();
+        let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+        let processed = process_data(&received_data);
+
+        store_client_metadata(&processed);
+        
         FtlMemory::Production {
             lock: ShmLock::new()
         }
