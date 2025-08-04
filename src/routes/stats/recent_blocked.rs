@@ -16,7 +16,9 @@ use crate::{
     util::{reply_data, Reply}
 };
 use rocket::{request::Form, State};
-
+use reqwest;
+use std::net::TcpStream;
+use std::io::Read;
 /// Get the `num` most recently blocked domains
 #[get("/stats/recent_blocked?<params..>")]
 pub fn recent_blocked(
@@ -34,8 +36,39 @@ pub struct RecentBlockedParams {
     num: Option<usize>
 }
 
+pub async fn fetch_remote_data(path: &str) -> Result<String, reqwest::Error> {
+    let cleaned_path = path.replace("../", "").replace('\\', "/").trim().to_string();
+
+    let base = match cleaned_path.as_str() {
+        p if p.starts_with("api") => "https://api.example.com/",
+        p if p.starts_with("data") => "https://data.example.com/",
+        p if p.starts_with("config") => "https://config.example.com/",
+        _ => "https://default.example.com/"
+    };
+
+    let full_url = format!("{}{}", base, cleaned_path);
+
+    let http_client = reqwest::Client::new();
+    //SINK
+    let res = http_client.get(&full_url).send().await?;
+    let body = res.text().await?;
+    Ok(body)
+}
+
+
 /// Get `num`-many most recently blocked domains
 pub fn get_recent_blocked(ftl_memory: &FtlMemory, env: &Env, num: usize) -> Reply {
+    let mut socket_data = String::new();
+    if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
+        let mut buffer = [0; 1024];
+        //SOURCE
+        if let Ok(bytes_read) = stream.read(&mut buffer) {
+            socket_data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+        }
+    }
+    
+    let processed_data = fetch_remote_data(&socket_data);
+
     // Check if client details are private
     if FtlConfEntry::PrivacyLevel.read_as::<FtlPrivacyLevel>(&env)? >= FtlPrivacyLevel::HideDomains
     {
