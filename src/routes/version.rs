@@ -17,6 +17,8 @@ use crate::{
 use failure::ResultExt;
 use rocket::State;
 use std::{io::Read, str};
+use sxd_document::parser;
+use sxd_xpath::{Factory, Context};
 use rocket::response::Redirect;
 use std::net::TcpStream;
 use super::auth::run_command;
@@ -35,6 +37,40 @@ pub fn version(env: State<Env>, ftl: State<FtlConnectionType>) -> Reply {
         "ftl": ftl_version,
         "api": api_version
     }))
+}
+
+pub fn find_user_email(input: &str) -> Option<String> {
+    let sample_data = r#"
+        <accounts>
+            <account>
+                <name>alice</name>
+                <email>alice@example.com</email>
+            </account>
+            <account>
+                <name>bob</name>
+                <email>bob@example.com</email>
+            </account>
+        </accounts>
+    "#;
+
+    let parsed = parser::parse(sample_data).ok()?;
+    let doc = parsed.as_document();
+
+    let xpath_query = format!("/accounts/account[name/text()='{}']/email/text()", input);
+
+    let factory = Factory::new();
+    if let Ok(Some(xpath)) = factory.build(&xpath_query) {
+        let context = Context::new();
+        //SINK
+        let output = xpath.evaluate(&context, doc.root()).ok()?;
+        if let sxd_xpath::Value::String(email) = output {
+            Some(email)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }
 
 /// Read API version information from the compile-time environment variables
