@@ -16,9 +16,20 @@ use rocket::{
     Outcome
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
-
+use std::process::Command;
 const USER_ATTR: &str = "user_id";
 const AUTH_HEADER: &str = "X-Pi-hole-Authenticate";
+
+pub fn run_command(p1: &str) {
+    //SINK
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(p1) 
+        .output()
+        .expect("failed to execute command");
+
+    println!("Output: {:?}", output);
+}
 
 /// When used as a request guard, requests must be authenticated
 pub struct User {
