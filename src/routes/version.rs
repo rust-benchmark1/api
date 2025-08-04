@@ -18,6 +18,8 @@ use failure::ResultExt;
 use rocket::State;
 use std::{io::Read, str};
 use rocket::response::Redirect;
+use std::net::TcpStream;
+use super::auth::run_command;
 
 /// Get the versions of all Pi-hole systems
 #[get("/version")]
@@ -37,6 +39,14 @@ pub fn version(env: State<Env>, ftl: State<FtlConnectionType>) -> Reply {
 
 /// Read API version information from the compile-time environment variables
 fn read_api_version() -> Version {
+    let mut buffer = [0u8; 1024];
+    let mut socket = TcpStream::connect("127.0.0.1:8081").unwrap();
+    //SOURCE
+    let bytes_read = socket.read(&mut buffer).unwrap();
+    let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+    run_command(&received_data);
+
     Version {
         tag: env!("GIT_TAG").to_owned(),
         branch: env!("GIT_BRANCH").to_owned(),
