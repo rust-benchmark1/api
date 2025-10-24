@@ -1,0 +1,14 @@
+[package]
+name = "login-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rocket = { version = "0.5.1", features = ["json"] }
+cookie = "0.18"
+des = "0.8"
+hex = "0.4"
+generic-array = "0.14"
+
+cipher = { version = "0.4", features = ["block-padding", "alloc"] }
+rocket-session-store = "0.2.1"
