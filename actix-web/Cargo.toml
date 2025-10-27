@@ -1,0 +1,21 @@
+[package]
+name = "actix-web"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4"
+actix-cors = "0.6"
+actix-session = { version = "0.8", features = ["cookie-session"] }
+serde = { version = "1.0", features = ["derive"] }
+simplelog = "0.12"
+log = "0.4"
+
+mongodb = { version = "2.8", features = ["tokio-runtime"] } 
+futures = "0.3"                                          
+des = "0.8"
+cipher = { version = "0.4", features = ["block-padding", "alloc"] }        
+generic-array = "0.14"                               
+hex = "0.4"                                                
+tokio = { version = "1.0", features = ["full"] }
+serde_json = "1.0" 
