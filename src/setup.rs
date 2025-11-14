@@ -20,7 +20,7 @@ use crate::{
     util::{Error, ErrorKind}
 };
 use rocket::config::{ConfigBuilder, Environment};
-use rocket_cors::Cors;
+use rocket_cors::{CorsOptions as RocketCorsOptions, AllowedOrigins, AllOrSome};
 
 #[cfg(test)]
 use crate::{databases::load_test_databases, env::PiholeFile};
@@ -107,10 +107,12 @@ fn setup(
     needs_database: bool
 ) -> rocket::Rocket {
     // Set up CORS
-    let cors = Cors {
-        allow_credentials: true,
-        ..Cors::default()
-    };
+    // CWE 942
+    //SINK
+    let cors = RocketCorsOptions::default().allowed_origins(AllowedOrigins::all())
+    .allow_credentials(true)
+    .to_cors()
+    .expect("Failed to create CORS");
 
     // Attach the databases if required
     let server = if needs_database {
@@ -142,7 +144,9 @@ fn setup(
         .mount("/", routes![
             web::web_interface_redirect,
             web::web_interface_index,
-            web::web_interface
+            web::web_interface,
+            web::register_user,
+            web::register_admin
         ])
         // Mount the API
         .mount("/admin/api", routes![
