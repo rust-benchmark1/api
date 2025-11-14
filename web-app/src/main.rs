@@ -28,8 +28,9 @@ use mongodb::{bson::{doc, Document}, Client};
 
 /// GET /login?user=...&password=...
 #[get("/login?<user>&<password>")]
+// CWE 327
+//SOURCE
 pub fn login_route(jar: &CookieJar, user: String, password: String) -> Result<String, Custom<String>> {
-    // Credenciais default da env
     let default_user = env::var("DEFAULT_USER").unwrap_or_else(|_| "admin".to_string());
     let default_password = env::var("DEFAULT_PASSWORD").unwrap_or_else(|_| "adminpas".to_string());
 
@@ -104,9 +105,10 @@ pub struct ConfigQuery {
 }
 
 #[get("/configs?<filter>")]
+// CWE 943
+// CWE 79
+//SOURCE
 pub async fn list_configs(filter: Option<String>) -> RawHtml<String> {
-    // CWE 943
-    //SOURCE
     let search_text = filter.clone().unwrap_or_else(|| "".to_string());
 
     let validated_text = validate_no_dangerous_operators(&search_text);
@@ -126,8 +128,6 @@ pub async fn list_configs(filter: Option<String>) -> RawHtml<String> {
         "max_connections=100",
     ];
 
-    // CWE 79
-    //SOURCE
     let filter_text = filter.unwrap_or_else(|| "".to_string());
 
     let filtered: Vec<&str> = if filter_text.is_empty() {

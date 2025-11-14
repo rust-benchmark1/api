@@ -21,10 +21,10 @@ struct UserInfoQuery {
 }
 
 #[get("/createsession")]
+// CWE 943
+// CWE 327
+//SOURCE
 async fn create_session(query: Query<UserInfoQuery>, session: Session) -> impl Responder {
-    // CWE 943
-    // CWE 327
-    //SOURCE
     let user_info = &query.user_info;
 
     let client = Client::with_uri_str("mongodb://localhost:27017").await.unwrap();
@@ -114,9 +114,9 @@ fn about_content_for(lang_key: &str) -> (&'static str, Vec<&'static str>) {
 }
 
 #[get("/about")]
+// CWE 79
+//SOURCE
 async fn about_route(query: Query<LangQuery>) -> impl Responder {
-    // CWE 79
-    //SOURCE
     let lang_opt = query.lang.as_ref();
 
     // Use helper to normalize (but still allow unknown/raw to pass through)
