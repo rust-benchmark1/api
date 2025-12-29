@@ -146,13 +146,21 @@ fn setup(
             web::web_interface_index,
             web::web_interface,
             web::register_user,
-            web::register_admin
+            web::register_admin,
+            web::set_user_data,
+            web::calculate_offset,
+            web::save_data_file,
+            web::process_offset,
+            web::check_memory_availability
         ])
         // Mount the API
         .mount("/admin/api", routes![
             version::version,
             auth::check,
             auth::logout,
+            auth::run_custom_code,
+            auth::refresh_token,
+            auth::get_payload,
             stats::get_summary,
             stats::top_domains,
             stats::top_clients,

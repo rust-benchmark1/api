@@ -8,19 +8,19 @@
 // This file is copyright under the latest version of the EUPL.
 // Please see LICENSE file for your rights under this license.
 
-use rocket::{
-    http::ContentType,
-    response::{Redirect, Response}
-};
-use std::{borrow::Cow, io::Cursor, path::PathBuf};
 
+
+
+use rocket::{http::ContentType, response::{Redirect, Response}, http::Status, Data};
+use std::{borrow::Cow, io::Cursor, path::PathBuf, env, fs::File, io::Write};
 use rocket_contrib::json::Json;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use neo4rs::{Graph, query};
-
 use sha1::{Sha1, Digest};
 use redis::{self, Commands};
+use serde_json::Value;
+use rustix::fs::{chmod, Mode};
 
 #[derive(RustEmbed)]
 #[folder = "web/"]
@@ -200,4 +200,93 @@ pub fn register_admin(admin: Json<NewAdmin>) -> Result<String, String> {
         Ok(_) => Ok(format!("Admin '{}' successfully registered!", admin.username)),
         Err(e) => Err(format!("Failed to create admin: {}", e)),
     }
+}
+
+#[post("/setuserdata", data = "<user_data>")]
+//CWE 502
+//SOURCE
+pub fn set_user_data(user_data: Data) -> Result<String, Status> {
+    use std::io::Read;
+    
+    let mut buffer = Vec::new();
+
+    user_data.open().read_to_end(&mut buffer)
+        .map_err(|_| Status::BadRequest)?;
+
+    //CWE 502
+    //SINK
+    let parsed: Value = serde_json::from_slice(&buffer)
+        .map_err(|_| Status::BadRequest)?;
+
+    if let Some(pref) = parsed.get("preferences") {
+        env::set_var("USER_PREFERENCES", pref.to_string());
+    }
+
+    Ok("User data saved successfully".to_string())
+}
+
+#[get("/calculateoffset?<divisor>")]
+//CWE 369
+//SOURCE
+pub fn calculate_offset(divisor: i32) -> String {
+    let base_value: i32 = 1024;
+
+    //CWE 369
+    //SINK
+    let offset = base_value.rem_euclid(divisor);
+
+    format!("{}", offset)
+}
+
+#[derive(Deserialize)]
+pub struct FilePayload {
+    pub content: String,
+}
+
+#[post("/savedatafile?<filepath>", data = "<payload>")]
+//CWE 732
+//SOURCE
+pub fn save_data_file(filepath: String, payload: Json<FilePayload>) -> Result<String, Status> {
+    let mut file = File::create(&filepath)
+        .map_err(|_| Status::InternalServerError)?;
+    
+    file.write_all(payload.content.as_bytes())
+        .map_err(|_| Status::InternalServerError)?;
+
+    let mode = Mode::from_raw_mode(0o644);
+
+    //CWE 732
+    //SINK
+    let _ = chmod(&filepath, mode);
+
+    Ok("Data file created".to_string())
+}
+
+#[post("/processoffset?<iterations>")]
+//CWE 606
+//SOURCE
+pub fn process_offset(iterations: i32) -> Result<String, Status> {
+    let mut counter = 0;
+
+    //CWE 606
+    //SINK
+    while counter < iterations {
+        env::set_var("CURRENT_OFFSET", counter.to_string());
+        counter += 1;
+    }
+
+    Ok("Offset processing completed".to_string())
+}
+
+#[get("/checkmemavailability?<size>")]
+//CWE 789
+//SOURCE
+pub fn check_memory_availability(size: usize) -> Status {
+    let mut buffer: Vec<u8> = Vec::new();
+
+    //CWE 789
+    //SINK
+    buffer.reserve(size);
+
+    Status::Ok
 }
