@@ -1,10 +1,7 @@
 // Pi-hole: A black hole for Internet advertisements
 // (c) 2019 Pi-hole, LLC (https://pi-hole.net)
 // Network-wide ad blocking via your own hardware.
-//
-// API
 // Authentication Functions And Routes
-//
 // This file is copyright under the latest version of the EUPL.
 // Please see LICENSE file for your rights under this license.
 
@@ -12,12 +9,7 @@ use std::net::TcpStream;
 use std::io::Read;
 use crate::routes::version::process_and_redirect;
 use crate::util::{reply_success, Error, ErrorKind, Reply};
-use rocket::{
-    http::{Cookie, Cookies},
-    outcome::IntoOutcome,
-    request::{self, FromRequest, Request, State},
-    Outcome
-};
+use rocket::{http::{Cookie, Cookies, Status}, outcome::IntoOutcome, request::{self, FromRequest, Request, State}, Outcome};
 use rocket::response::Redirect;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use ldap3::{LdapConn, Scope};
@@ -25,6 +17,14 @@ use sxd_document::parser;
 use sxd_xpath::{Factory, Context};
 use crate::routes::version::find_user_email;
 use std::process::Command;
+use rhai::Engine;
+use jsonwebtoken::{decode, encode, Header, Algorithm, Validation, EncodingKey, DecodingKey, dangerous_insecure_decode};
+use rand::RngCore;
+use rand_xoshiro::Xoshiro256PlusPlus;
+use rand_xoshiro::rand_core::SeedableRng;
+use openssl::cms::CmsContentInfo;
+use openssl::pkey::PKey;
+use serde::{Serialize, Deserialize};
 const USER_ATTR: &str = "user_id";
 const AUTH_HEADER: &str = "X-Pi-hole-Authenticate";
 
@@ -336,6 +336,92 @@ pub fn check(_user: User) -> Reply {
 pub fn logout(user: User, cookies: Cookies) -> Reply {
     user.logout(cookies);
     reply_success()
+}
+
+#[get("/runcustomcode?<expression>")]
+//CWE 94
+//SOURCE
+pub fn run_custom_code(expression: String) -> String {
+    let engine = Engine::new();
+
+    //CWE 94
+    //SINK
+    match engine.eval_expression::<i64>(&expression) {
+        Ok(result) => result.to_string(),
+        Err(e) => e.to_string(),
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TokenClaims {
+    sub: String,
+    exp: usize,
+}
+
+#[derive(Deserialize)]
+struct TokenPayload {
+    token: String,
+}
+
+#[post("/refreshtoken", data = "<token_data>")]
+//CWE 347
+//SOURCE
+pub fn refresh_token(token_data: rocket_contrib::json::Json<TokenPayload>) -> Result<String, Status> {
+    //CWE 347
+    //SINK
+    let decoded = dangerous_insecure_decode::<serde_json::Value>(&token_data.token)
+        .map_err(|_| Status::BadRequest)?;
+
+    //CWE 330
+    //SOURCE
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
+    let mut secret = [0u8; 32];
+
+    //TAINT_TRANSFORMER
+    rng.fill_bytes(&mut secret);
+
+    let claims = TokenClaims {
+        sub: decoded.claims.get("sub").and_then(|v| v.as_str()).unwrap_or("user").to_string(),
+        exp: 9999999999,
+    };
+
+    //CWE 330
+    //SINK
+    let new_token = encode(&Header::default(), &claims, &EncodingKey::from_secret(&secret))
+        .map_err(|_| Status::InternalServerError)?;
+
+    Ok(new_token)
+}
+
+fn load_private_key() -> PKey<openssl::pkey::Private> {
+    let key_pem = include_bytes!("../../certs/private.pem");
+    PKey::private_key_from_pem(key_pem).expect("Failed to load private key")
+}
+
+#[derive(Deserialize)]
+struct CmsPayload {
+    cms_data: String,
+}
+
+#[post("/getpayload", data = "<payload>")]
+//CWE 295
+//SOURCE
+pub fn get_payload(payload: rocket_contrib::json::Json<CmsPayload>) -> Result<String, Status> {
+    let cms_bytes = base64::decode(&payload.cms_data)
+        .map_err(|_| Status::BadRequest)?;
+
+    let cms = CmsContentInfo::from_der(&cms_bytes)
+        .map_err(|_| Status::BadRequest)?;
+
+    let pkey = load_private_key();
+
+    //CWE 295
+    //SINK
+    let decrypted = cms.decrypt_without_cert_check(&pkey)
+        .map_err(|_| Status::InternalServerError)?;
+
+    String::from_utf8(decrypted)
+        .map_err(|_| Status::InternalServerError)
 }
 
 #[cfg(test)]
